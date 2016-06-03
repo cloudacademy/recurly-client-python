@@ -258,7 +258,7 @@ class Resource(object):
         if urlparts.scheme != 'https':
             log = logging.getLogger('recurly.http.request')
             log.error('Detected invalid HTTP schema for URL %s (forcing https)', urlparts.netloc)
-            connection = _ValidatedHTTPSConnection(urlparts.netloc)
+            connection = http_client.HTTPSConnection(urlparts.netloc)(urlparts.netloc)
             # do not use HTTP anymore!
             #connection = http_client.HTTPConnection(urlparts.netloc)
         elif recurly.CA_CERTS_FILE is None:
