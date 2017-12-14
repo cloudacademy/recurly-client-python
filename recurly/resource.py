@@ -1,9 +1,8 @@
 import base64
+import re
 from datetime import datetime
 import logging
-import socket
 import ssl
-import sys
 from xml.etree import ElementTree
 
 import iso8601
@@ -14,12 +13,6 @@ import recurly.errors
 from recurly.link_header import parse_link_value
 from six.moves import http_client
 from six.moves.urllib.parse import urlencode, urljoin, urlsplit
-
-
-if six.PY3:
-    from ssl import match_hostname
-else:
-    from backports.ssl_match_hostname import match_hostname
 
 
 class Money(object):
@@ -111,7 +104,6 @@ class Page(list):
         except AttributeError:
             return 0
 
-
     def next_page(self):
         """Return the next `Page` after this one in the result sequence
         it's from.
@@ -172,35 +164,6 @@ class Page(list):
         return page
 
 
-class _ValidatedHTTPSConnection(http_client.HTTPSConnection):
-
-    """An `http_client.HTTPSConnection` that validates the SSL connection by
-    requiring certificate validation and checking the connection's intended
-    hostname again the validated certificate's possible hosts."""
-
-    def connect(self):
-        socket_timeout = recurly.SOCKET_TIMEOUT_SECONDS or self.timeout
-        if sys.version_info < (2, 7):
-            sock = socket.create_connection((self.host, self.port),
-                                            socket_timeout)
-        else:
-            sock = socket.create_connection((self.host, self.port),
-                                            socket_timeout, self.source_address)
-
-        if self._tunnel_host:
-            self.sock = sock
-            self._tunnel()
-
-        ssl_sock = ssl.wrap_socket(sock, self.key_file, self.cert_file,
-            ssl_version=ssl.PROTOCOL_SSLv3, cert_reqs=ssl.CERT_REQUIRED,
-            ca_certs=recurly.CA_CERTS_FILE)
-
-        # Let the CertificateError for failure be raised to the caller.
-        match_hostname(ssl_sock.getpeercert(), self.host)
-
-        self.sock = ssl_sock
-
-
 class Resource(object):
 
     """A Recurly API resource.
@@ -226,6 +189,18 @@ class Resource(object):
     parent `Resource`, and therefore should not use `Money` instances
     even though this `Resource` class has no ``currency`` attribute of
     its own."""
+
+    def serializable_attributes(self):
+        """ Attributes to be serialized in a ``POST`` or ``PUT`` request.
+        Returns all attributes unless a blacklist is specified
+        """
+
+        if hasattr(self, 'blacklist_attributes'):
+            return [attr for attr in self.attributes if attr not in
+                    self.blacklist_attributes]
+        else:
+            return self.attributes
+
 
     def __init__(self, **kwargs):
         try:
@@ -254,7 +229,22 @@ class Resource(object):
         respectively.
 
         """
+
+        if recurly.API_KEY is None:
+            raise recurly.UnauthorizedError('recurly.API_KEY not set')
+
+        is_non_ascii = lambda s: any(ord(c) >= 128 for c in s)
+
+        if is_non_ascii(recurly.API_KEY) or is_non_ascii(recurly.SUBDOMAIN):
+            raise recurly.ConfigurationError("""Setting API_KEY or SUBDOMAIN to
+                    unicode strings may cause problems. Please use strings.
+                    Issue described here:
+                    https://gist.github.com/maximehardy/d3a0a6427d2b6791b3dc""")
+
         urlparts = urlsplit(url)
+        connection_options = {}
+        if recurly.SOCKET_TIMEOUT_SECONDS:
+            connection_options['timeout'] = recurly.SOCKET_TIMEOUT_SECONDS
         if urlparts.scheme != 'https':
             log = logging.getLogger('recurly.http.request')
             log.error('Detected invalid HTTP schema for URL %s (forcing https)', urlparts.netloc)
@@ -262,17 +252,17 @@ class Resource(object):
             # do not use HTTP anymore!
             #connection = http_client.HTTPConnection(urlparts.netloc)
         elif recurly.CA_CERTS_FILE is None:
-            connection = http_client.HTTPSConnection(urlparts.netloc)
+            connection = http_client.HTTPSConnection(urlparts.netloc, **connection_options)
         else:
-            connection = _ValidatedHTTPSConnection(urlparts.netloc)
+            connection_options['context'] = ssl.create_default_context(cafile=recurly.CA_CERTS_FILE)
+            connection = http_client.HTTPSConnection(urlparts.netloc, **connection_options)
 
         headers = {} if headers is None else dict(headers)
         headers.setdefault('Accept', 'application/xml')
         headers.update({
-            'User-Agent': 'recurly-python/%s' % recurly.__version__,
+            'User-Agent': recurly.USER_AGENT
         })
-        if recurly.API_KEY is None:
-            raise recurly.UnauthorizedError('recurly.API_KEY not set')
+        headers['X-Api-Version'] = recurly.api_version()
         headers['Authorization'] = 'Basic %s' % base64.b64encode(six.b('%s:' % recurly.API_KEY)).decode()
 
         log = logging.getLogger('recurly.http.request')
@@ -295,8 +285,6 @@ class Resource(object):
         if method in ('POST', 'PUT') and body is None:
             headers['Content-Length'] = '0'
         connection.request(method, url, body, headers)
-        if recurly.SOCKET_TIMEOUT_SECONDS:
-            connection.sock.settimeout(recurly.SOCKET_TIMEOUT_SECONDS)
         resp = connection.getresponse()
 
         log = logging.getLogger('recurly.http.response')
@@ -409,6 +397,8 @@ class Resource(object):
         log.debug("Converting %r element with type %r", elem.tag, attr_type)
         if attr_type == 'integer':
             return int(elem.text.strip())
+        if attr_type == 'float':
+            return float(elem.text.strip())
         if attr_type == 'boolean':
             return elem.text.strip() == 'true'
         if attr_type == 'datetime':
@@ -442,11 +432,11 @@ class Resource(object):
 
         The value argument may be:
         * a `Resource` instance
-        * a list or tuple of `Resource` instances
         * a `Money` instance
         * a `datetime.datetime` instance
         * a string, integer, or boolean value
         * ``None``
+        * a list or tuple of these values
 
         """
         if isinstance(value, Resource):
@@ -468,12 +458,10 @@ class Resource(object):
         elif isinstance(value, list) or isinstance(value, tuple):
             el.attrib['type'] = 'array'
             for sub_resource in value:
-                try:
-                    elementize = sub_resource.to_element
-                except AttributeError:
-                    raise ValueError("Could not serialize member %r of list %r as a Resource instance"
-                        % (sub_resource, attrname))
-                el.append(elementize())
+                if hasattr(sub_resource, 'to_element'):
+                  el.append(sub_resource.to_element())
+                else:
+                  el.append(cls.element_for_value(re.sub(r"s$", "", attrname), sub_resource))
         elif isinstance(value, Money):
             value.add_to_element(el)
         else:
@@ -583,7 +571,13 @@ class Resource(object):
                         return Page.page_for_value(resp, value)
                     return value
                 return relatitator
-            return make_relatitator(elem.attrib['href'])
+
+            url = elem.attrib['href']
+
+            if url is '':
+                return Resource.value_for_element(elem)
+            else:
+                return make_relatitator(url)
 
         return self.value_for_element(elem)
 
@@ -617,7 +611,15 @@ class Resource(object):
         return self._create()
 
     def _update(self):
-        url = self._url
+        return self.put(self._url)
+
+    def _create(self):
+        url = urljoin(recurly.base_uri(), self.collection_path)
+        return self.post(url)
+
+    def put(self, url):
+        """Sends this `Resource` instance to the service with a
+        ``PUT`` request to the given URL."""
         response = self.http_request(url, 'PUT', self, {'Content-Type': 'application/xml; charset=utf-8'})
         if response.status != 200:
             self.raise_http_error(response)
@@ -626,20 +628,16 @@ class Resource(object):
         logging.getLogger('recurly.http.response').debug(response_xml)
         self.update_from_element(ElementTree.fromstring(response_xml))
 
-    def _create(self):
-        url = urljoin(recurly.base_uri(), self.collection_path)
-        return self.post(url)
-
-    def post(self, url):
+    def post(self, url, body=None):
         """Sends this `Resource` instance to the service with a
-        ``POST`` request to the given URL."""
-        response = self.http_request(url, 'POST', self, {'Content-Type': 'application/xml; charset=utf-8'})
-        if response.status not in (201, 204):
+        ``POST`` request to the given URL. Takes an optional body"""
+        response = self.http_request(url, 'POST', body or self, {'Content-Type': 'application/xml; charset=utf-8'})
+        if response.status not in (200, 201, 204):
             self.raise_http_error(response)
 
         self._url = response.getheader('Location')
 
-        if response.status == 201:
+        if response.status in (200, 201):
             response_xml = response.read()
             logging.getLogger('recurly.http.response').debug(response_xml)
             self.update_from_element(ElementTree.fromstring(response_xml))
@@ -647,9 +645,7 @@ class Resource(object):
     def delete(self):
         """Submits a deletion request for this `Resource` instance as
         a ``DELETE`` request to its URL."""
-        url = self._url
-
-        response = self.http_request(url, 'DELETE')
+        response = self.http_request(self._url, 'DELETE')
         if response.status != 204:
             self.raise_http_error(response)
 
@@ -665,7 +661,7 @@ class Resource(object):
     def to_element(self):
         """Serialize this `Resource` instance to an XML element."""
         elem = ElementTree.Element(self.nodename)
-        for attrname in self.attributes:
+        for attrname in self.serializable_attributes():
             # Only use values that have been loaded into the internal
             # __dict__. For retrieved objects we look into the XML response at
             # access time, so the internal __dict__ contains only the elements

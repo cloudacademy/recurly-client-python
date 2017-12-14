@@ -1,3 +1,142 @@
+## Unreleased
+
+## Version 2.2.20 May 23, 2016
+
+- Add `ConfigurationException` when API_KEY or SUBDOMAIN is unicode
+- Add transaction_error_code property to ValidationError class
+- Fix apply timeout to connection object
+- Add python 3.5 to travis tests
+- Add fraud info if available on `Transaction`
+- Add Usage Based Billing
+- Add generator comprehensions in js module
+- Add Free Trial Coupons
+
+## Version 2.2.19 February 22, 2016
+
+- Added `currency` attribute to the `BillingInfo` class
+
+## Version 2.2.18 February 11, 2016
+
+- Add `mark_failed` API call to `Invoice`
+- Add the python version to the user agent string
+- Fix the `delete_url` on the Redemption class by removing the override
+- Add support for `cc_emails` attribute in `Account` class
+- Remove AttributeError when trying to print ValidationError in Python 3
+- Remove _ValidatedHTTPSConnection in favor of native functionality
+- Add collection_method and net_terms attributes for invoice calls
+
+## Version 2.2.17 October 2, 2015
+
+- Add support for bulk coupons and coupon code generation
+- Add support for editing and restoring coupons
+
+## Version 2.2.16 September 30, 2015
+
+- Remove TLS 1.0 flag allowing proper TLS negotiation
+- Fix recursive call to `str(self)` in python 3
+
+## Version 2.2.15 August 31, 2015
+
+- Add `coupon_codes` to `Subscription`
+- Adding `setup_fee_accounting_code` to `Plan`
+- Add `total_billing_cycles` to `Plan`
+- Add `redemption_resource` to `Coupon`
+- Adding X-Api-Version support
+- Setting X-Api-Version to 2.1
+- Adding `redemptions` to `Account`
+- Adding `redemptions` to `Invoice`
+- Adding `uuid` to `CouponRedemption`
+- Add `applies_to_non_plan_charges` to `Coupon`
+
+## Version 2.2.14 August 10, 2015
+
+- Add `gateway_error_code` to `TransactionError`
+
+## Version 2.2.13 July 31, 2015
+
+- Require a version of six library >= 1.4.0
+- Add `tax_exempt`, `tax_code`, `accounting_code` to `Transaction`
+- Add `duration` to `Coupon`
+- Add `temporal_unit` to `Coupon`
+- Add `temporal_amount` to `Coupon`
+
+## Version 2.2.12 June 25, 2015
+
+- Add `ip_address` to `Transaction`
+- Add `closed_at` to `Invoice`
+- Add `refund_apply_order` to `Invoice` for specifying credits or transactions
+to be refunded first
+
+## Version 2.2.11 May 6, 2015
+
+- Add `bank_account_authorized_at` to `Subscription`
+
+## Version 2.2.10 April 28, 2015
+
+- Add `tax_type`, `tax_rate`, `tax_region` to `Adjustment`
+- Added `bank_account` type and attributes to `BillingInfo`, these include:
+	- `name_on_account`
+	- `account_type` (`checking` or `savings`)
+	- `last_four`
+	- `routing_number`
+
+## Version 2.2.9 February 6, 2015
+
+- Added `original_adjustment()` to `Adjustment` for retrieving the linked
+adjustment where the other came from for better accounting purposes
+
+## Version 2.2.8 January 27, 2015
+
+- Added address attribute into preview calls and update invoice notes path
+- Added tests for new read-only attribute `vat_location_valid` on `Account`
+- Added `invoice_number_prefix` and `invoice_number_with_prefix()` on
+`Invoice` for use with the Country Invoice Sequencing feature
+- Added support for update_notes path on Subscription
+- Added `refund_amount` (open amount refunds) to `Invoice`
+- Added `refund` (line item refunds) to `Invoice`
+
+## Version 2.2.7 December 8, 2014
+
+- Added ability to read and write invoice notes
+- Added `tax_code` to `plan`, `add_ons`, and `adjustment`
+- Added inspection on the details of a `transaction`: `transaction.details`
+and `transaction.transaction_error`
+- Removed support for SSLv3
+
+## Version 2.2.6 October 31, 2014
+
+- Bug fix: `subscription.invoice` now returns the invoice for subscription
+change previewing
+
+## Version 2.2.5 October 21, 2014
+
+- Added invoice previews: `account.build_invoice()`
+
+## Version 2.2.4 September 9, 2014
+
+- Added account entity use code: `account.entity_use_code`
+- Added bulk parameter
+- Added billing agreement support to BillingInfo
+
+## Version 2.2.3 August 5, 2014
+
+- Added subscription change preview
+- Added `remaining_billing_cycles` to subscriptions
+
+## Version 2.2.2 June 25, 2014
+- Added subscription preview: `subscription.preview()`
+
+## Version 2.2.1 June 6, 2014
+- Added tests for `invoice_description`
+
+## Version 2.2.0 May 14, 2014
+
+- Added tax details to adjustments: `adjustment.tax_details`
+- Removed `taxable` support on adjustments
+- Added `tax_exempt` to accounts, adjustments and plans
+- Added `tax_rate`, `tax_type` to invoices and subscriptions
+- Added `tax_in_cents` to subscriptions
+
 ## Version 2.1.15 April 8, 2014
 
 - Added token_id support to BillingInfo

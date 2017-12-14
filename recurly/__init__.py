@@ -1,10 +1,12 @@
 import logging
+import sys
 from six.moves.urllib.parse import urljoin
 from xml.etree import ElementTree
 
+import recurly
 import recurly.js as js
 from recurly.errors import *
-from recurly.resource import Resource, Money, PageError
+from recurly.resource import Resource, Money, PageError, Page
 
 
 """
@@ -13,12 +15,14 @@ Recurly's Python client library is an interface to its REST API.
 
 Please see the Recurly API documentation for more information:
 
-http://docs.recurly.com/api/
+https://dev.recurly.com/docs/getting-started
 
 """
 
+__version__ = '2.2.20'
+__python_version__ = '.'.join(map(str, sys.version_info[:3]))
 
-__version__ = '2.1.15'
+USER_AGENT = 'recurly-python/%s; python %s' % (recurly.__version__, recurly.__python_version__)
 
 BASE_URI = 'https://%s.recurly.com/v2/'
 """The API endpoint to send requests to."""
@@ -28,6 +32,9 @@ SUBDOMAIN = 'api'
 
 API_KEY = None
 """The API key to use when authenticating API requests."""
+
+API_VERSION = '2.2'
+"""The API version to use when making API requests."""
 
 CA_CERTS_FILE = None
 """A file contianing a set of concatenated certificate authority certs
@@ -46,6 +53,8 @@ def base_uri():
 
     return BASE_URI % SUBDOMAIN
 
+def api_version():
+    return API_VERSION
 
 class Address(Resource):
 
@@ -58,7 +67,7 @@ class Address(Resource):
         'state',
         'zip',
         'country',
-        'phone'
+        'phone',
     )
 
 
@@ -79,7 +88,10 @@ class Account(Resource):
         'last_name',
         'company_name',
         'vat_number',
+        'tax_exempt',
+        'entity_use_code',
         'accept_language',
+        'cc_emails',
         'created_at',
     )
 
@@ -171,11 +183,16 @@ class Account(Resource):
         url = urljoin(self._url, '%s/adjustments' % self.account_code)
         return charge.post(url)
 
-    def invoice(self):
+    def invoice(self, **kwargs):
         """Create an invoice for any outstanding adjustments this account has."""
         url = urljoin(self._url, '%s/invoices' % self.account_code)
 
-        response = self.http_request(url, 'POST')
+        if kwargs:
+            response = self.http_request(url, 'POST', Invoice(**kwargs), {'Content-Type':
+                'application/xml; charset=utf-8'})
+        else:
+            response = self.http_request(url, 'POST')
+
         if response.status != 201:
             self.raise_http_error(response)
 
@@ -187,10 +204,31 @@ class Account(Resource):
         invoice._url = response.getheader('Location')
         return invoice
 
+    def build_invoice(self):
+        """Preview an invoice for any outstanding adjustments this account has."""
+        url = urljoin(self._url, '%s/invoices/preview' % self.account_code)
+
+        response = self.http_request(url, 'POST')
+        if response.status != 200:
+            self.raise_http_error(response)
+
+        response_xml = response.read()
+        logging.getLogger('recurly.http.response').debug(response_xml)
+        elem = ElementTree.fromstring(response_xml)
+
+        invoice = Invoice.from_element(elem)
+        return invoice
+
     def notes(self):
         """Fetch Notes for this account."""
         url = urljoin(self._url, '%s/notes' % self.account_code)
         return Note.paginated(url)
+
+    def redemption(self):
+      try:
+        return self.redemptions()[0]
+      except AttributeError:
+        raise AttributeError("redemption")
 
     def reopen(self):
         """Reopen a closed account."""
@@ -233,6 +271,7 @@ class BillingInfo(Resource):
 
     attributes = (
         'type',
+        'name_on_account',
         'first_name',
         'last_name',
         'number',
@@ -256,10 +295,15 @@ class BillingInfo(Resource):
         'card_type',
         'first_six',
         'last_four',
-        'billing_agreement_id',
-        'token_id'
+        'paypal_billing_agreement_id',
+        'amazon_billing_agreement_id',
+        'token_id',
+        'account_type',
+        'routing_number',
+        'account_number',
+        'currency',
     )
-    sensitive_attributes = ('number', 'verification_value')
+    sensitive_attributes = ('number', 'verification_value', 'account_number')
     xml_attribute_attributes = ('type',)
 
 class Coupon(Resource):
@@ -278,13 +322,25 @@ class Coupon(Resource):
         'discount_percent',
         'discount_in_cents',
         'redeem_by_date',
+        'invoice_description',
         'single_use',
         'applies_for_months',
+        'duration',
+        'temporal_unit',
+        'temporal_amount',
         'max_redemptions',
         'applies_to_all_plans',
+        'applies_to_non_plan_charges',
+        'redemption_resource',
         'created_at',
         'plan_codes',
         'hosted_description',
+        'max_redemptions_per_account',
+        'coupon_type',
+        'unique_code_template',
+        'unique_coupon_codes',
+        'free_trial_unit',
+        'free_trial_amount',
     )
 
     @classmethod
@@ -336,6 +392,27 @@ class Coupon(Resource):
         """
         return cls.all(state='maxed_out', **kwargs)
 
+    def has_unlimited_redemptions_per_account(self):
+        return self.max_redemptions_per_account == None
+
+    def generate(self, amount):
+        elem = ElementTree.Element(self.nodename)
+        elem.append(Resource.element_for_value('number_of_unique_codes', amount))
+
+        url = urljoin(self._url, '%s/generate' % (self.coupon_code, ))
+        body = ElementTree.tostring(elem, encoding='UTF-8')
+
+        response = self.http_request(url, 'POST', body, { 'Content-Type':
+            'application/xml; charset=utf-8' })
+
+        if response.status not in (200, 201, 204):
+            self.raise_http_error(response)
+
+        return Page.page_for_url(response.getheader('Location'))
+
+    def restore(self):
+        url = urljoin(self._url, '%s/restore' % self.coupon_code)
+        self.put(url)
 
 class Redemption(Resource):
 
@@ -347,10 +424,24 @@ class Redemption(Resource):
         'account_code',
         'single_use',
         'total_discounted_in_cents',
+        'subscription_uuid',
         'currency',
         'created_at',
     )
 
+class TaxDetail(Resource):
+
+    """A charge's tax breakdown"""
+
+    nodename = 'taxdetail'
+    inherits_currency = True
+
+    attributes = (
+        'name',
+        'type',
+        'tax_rate',
+        'tax_in_cents',
+    )
 
 class Adjustment(Resource):
 
@@ -367,15 +458,33 @@ class Adjustment(Resource):
         'unit_amount_in_cents',
         'discount_in_cents',
         'tax_in_cents',
+        'tax_type',
+        'tax_region',
+        'tax_rate',
         'total_in_cents',
         'currency',
-        'taxable',
+        'tax_exempt',
+        'tax_code',
+        'tax_details',
         'start_date',
         'end_date',
         'created_at',
         'type',
     )
     xml_attribute_attributes = ('type',)
+    _classes_for_nodename = {'tax_detail': TaxDetail,}
+
+    # This can be removed when the `original_adjustment_uuid` is moved to a link
+    def __getattr__(self, name):
+        if name == 'original_adjustment':
+            try:
+                uuid = super(Adjustment, self).__getattr__('original_adjustment_uuid')
+            except (AttributeError):
+                return super(Adjustment, self).__getattr__(name)
+
+            return lambda: Adjustment.get(uuid)
+        else:
+            return super(Adjustment, self).__getattr__(name)
 
 
 class Invoice(Resource):
@@ -392,16 +501,32 @@ class Invoice(Resource):
         'uuid',
         'state',
         'invoice_number',
+        'invoice_number_prefix',
         'po_number',
         'vat_number',
         'subtotal_in_cents',
         'tax_in_cents',
+        'tax_type',
+        'tax_rate',
         'total_in_cents',
         'currency',
         'created_at',
         'line_items',
         'transactions',
+        'terms_and_conditions',
+        'customer_notes',
+        'address',
+        'closed_at',
+        'collection_method',
+        'net_terms',
     )
+
+    blacklist_attributes = (
+        'currency',
+    )
+
+    def invoice_number_with_prefix(self):
+        return '%s%s' % (self.invoice_number_prefix, self.invoice_number)
 
     @classmethod
     def all_open(cls, **kwargs):
@@ -454,6 +579,53 @@ class Invoice(Resource):
         pdf_response = cls.http_request(url, headers={'Accept': 'application/pdf'})
         return pdf_response.read()
 
+    def refund_amount(self, amount_in_cents, refund_apply_order = 'credit'):
+        amount_element = self.refund_open_amount_xml(amount_in_cents, refund_apply_order)
+        return self._create_refund_invoice(amount_element)
+
+    def refund(self, adjustments, refund_apply_order = 'credit'):
+        adjustments_element = self.refund_line_items_xml(adjustments, refund_apply_order)
+        return self._create_refund_invoice(adjustments_element)
+
+    def refund_open_amount_xml(self, amount_in_cents, refund_apply_order):
+        elem = ElementTree.Element(self.nodename)
+        elem.append(Resource.element_for_value('refund_apply_order', refund_apply_order))
+        elem.append(Resource.element_for_value('amount_in_cents',
+            amount_in_cents))
+        return elem
+
+    def refund_line_items_xml(self, line_items, refund_apply_order):
+        elem = ElementTree.Element(self.nodename)
+        elem.append(Resource.element_for_value('refund_apply_order', refund_apply_order))
+
+        line_items_elem = ElementTree.Element('line_items')
+
+        for item in line_items:
+            adj_elem = ElementTree.Element('adjustment')
+            adj_elem.append(Resource.element_for_value('uuid',
+                item['adjustment'].uuid))
+            adj_elem.append(Resource.element_for_value('quantity',
+            item['quantity']))
+            adj_elem.append(Resource.element_for_value('prorate', item['prorate']))
+            line_items_elem.append(adj_elem)
+
+        elem.append(line_items_elem)
+        return elem
+
+    def _create_refund_invoice(self, element):
+        url = urljoin(self._url, '%s/refund' % (self.invoice_number, ))
+        body = ElementTree.tostring(element, encoding='UTF-8')
+
+        refund_invoice = Invoice()
+        refund_invoice.post(url, body)
+
+        return refund_invoice
+
+    def redemption(self):
+      try:
+        return self.redemptions()[0]
+      except AttributeError:
+        raise AttributeError("redemption")
 
 class Subscription(Resource):
 
@@ -469,6 +641,7 @@ class Subscription(Resource):
         'state',
         'plan_code',
         'coupon_code',
+        'coupon_codes',
         'quantity',
         'activated_at',
         'canceled_at',
@@ -479,7 +652,11 @@ class Subscription(Resource):
         'trial_started_at',
         'trial_ends_at',
         'unit_amount_in_cents',
+        'tax_in_cents',
+        'tax_type',
+        'tax_rate',
         'total_billing_cycles',
+        'remaining_billing_cycles',
         'timeframe',
         'currency',
         'subscription_add_ons',
@@ -489,8 +666,29 @@ class Subscription(Resource):
         'collection_method',
         'po_number',
         'first_renewal_date',
+        'bulk',
+        'terms_and_conditions',
+        'customer_notes',
+        'vat_reverse_charge_notes',
+        'bank_account_authorized_at',
+        'redemptions',
     )
-    sensitive_attributes = ('number', 'verification_value',)
+    sensitive_attributes = ('number', 'verification_value', 'bulk')
+
+    def preview(self):
+        if hasattr(self, '_url'):
+            url = self._url + '/preview'
+            return self.post(url)
+        else:
+            url = urljoin(recurly.base_uri(), self.collection_path) + '/preview'
+            return self.post(url)
+
+    def update_notes(self, **kwargs):
+        """Updates the notes on the subscription without generating a change"""
+        for key, val in kwargs.iteritems():
+            setattr(self, key, val)
+        url = urljoin(self._url, '%s/notes' % self.uuid)
+        self.put(url)
 
     def _update(self):
         if not hasattr(self, 'timeframe'):
@@ -503,6 +701,70 @@ class Subscription(Resource):
         else:
             return name
 
+    def create_usage(self, sub_add_on, usage):
+        """Record the usage on the given subscription add on and update the
+        usage object with returned xml"""
+        url = urljoin(self._url, '%s/add_ons/%s/usage' % (self.uuid,
+            sub_add_on.add_on_code))
+        return usage.post(url)
+
+class TransactionBillingInfo(recurly.Resource):
+    node_name = 'billing_info'
+    attributes = (
+        'first_name',
+        'last_name',
+        'address1',
+        'address2',
+        'city',
+        'state',
+        'country',
+        'zip',
+        'phone',
+        'vat_number',
+        'first_six',
+        'last_four',
+        'card_type',
+        'month',
+        'year',
+        'transaction_uuid',
+    )
+
+
+class TransactionAccount(recurly.Resource):
+    node_name = 'account'
+    attributes = (
+        'first_name',
+        'last_name',
+        'company',
+        'email',
+        'account_code',
+    )
+    _classes_for_nodename = {'billing_info': TransactionBillingInfo}
+
+
+class TransactionDetails(recurly.Resource):
+    node_name = 'details'
+    attributes = ('account')
+    _classes_for_nodename = {'account': TransactionAccount}
+
+
+class TransactionError(recurly.Resource):
+    node_name = 'transaction_error'
+    attributes = (
+        'id',
+        'merchant_message',
+        'error_caterogy',
+        'customer_message',
+        'error_code',
+        'gateway_error_code',
+    )
+
+class TransactionFraudInfo(recurly.Resource):
+    node_name = 'fraud'
+    attributes = (
+        'score',
+        'decision',
+    )
 
 class Transaction(Resource):
 
@@ -534,9 +796,19 @@ class Transaction(Resource):
         'details',
         'transaction_error',
         'type',
+        'ip_address',
+        'tax_exempt',
+        'tax_code',
+        'accounting_code',
+        'fraud',
     )
     xml_attribute_attributes = ('type',)
     sensitive_attributes = ('number', 'verification_value',)
+    _classes_for_nodename = {
+        'details': TransactionDetails,
+        'fraud': TransactionFraudInfo,
+        'transaction_error': TransactionError
+    }
 
     def _handle_refund_accepted(self, response):
         if response.status != 202:
@@ -589,6 +861,9 @@ class Transaction(Resource):
         return actionator(**kwargs)
 
 
+Transaction._classes_for_nodename['transaction'] = Transaction
+
+
 class Plan(Resource):
 
     """A service level for your service to which a customer account
@@ -616,9 +891,13 @@ class Plan(Resource):
         'trial_interval_length',
         'trial_interval_unit',
         'accounting_code',
+        'setup_fee_accounting_code',
         'created_at',
+        'tax_exempt',
+        'tax_code',
         'unit_amount_in_cents',
         'setup_fee_in_cents',
+        'total_billing_cycles',
     )
 
     def get_add_on(self, add_on_code):
@@ -632,6 +911,40 @@ class Plan(Resource):
         url = urljoin(self._url, '%s/add_ons' % self.plan_code)
         return add_on.post(url)
 
+class Usage(Resource):
+
+    """A recording of usage agains a measured unit"""
+
+    nodename = 'usage'
+    collection_path = 'usages'
+
+    attributes = (
+        'measured_unit',
+        'amount',
+        'merchant_tag',
+        'recording_timestamp',
+        'usage_timestamp',
+        'usage_type',
+        'unit_amount_in_cents',
+        'usage_percentage',
+        'billed_at',
+        'created_at',
+        'updated_at',
+    )
+
+class MeasuredUnit(Resource):
+
+    """A unit of measurement for usage based billing"""
+
+    nodename = 'measured_unit'
+    member_path = 'measured_units/%s'
+
+    attributes = (
+        'id',
+        'name',
+        'display_name',
+        'description',
+    )
 
 class AddOn(Resource):
 
@@ -648,9 +961,12 @@ class AddOn(Resource):
         'default_quantity',
         'accounting_code',
         'unit_amount_in_cents',
+        'measured_unit_id',
+        'usage_type',
+        'add_on_type',
+        'tax_code',
         'created_at',
     )
-
 
 class SubscriptionAddOn(Resource):
 
@@ -668,6 +984,7 @@ class SubscriptionAddOn(Resource):
         'add_on_code',
         'quantity',
         'unit_amount_in_cents',
+        'address',
     )
 
 class Note(Resource):

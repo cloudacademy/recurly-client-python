@@ -1,7 +1,8 @@
 POST https://api.recurly.com/v2/accounts HTTP/1.1
+X-Api-Version: 2.2
 Accept: application/xml
 Authorization: Basic YXBpa2V5Og==
-User-Agent: recurly-python/{version}
+User-Agent: {user-agent}
 Content-Type: application/xml; charset=utf-8
 
 <?xml version="1.0" encoding="UTF-8"?>
@@ -28,14 +29,16 @@ Location: https://api.recurly.com/v2/accounts/testmock
   <last_name nil="nil"></last_name>
   <company_name nil="nil"></company_name>
   <vat_number>444444-UK</vat_number>
+  <cc_emails>test1@example.com,test2@example.com</cc_emails>
   <address>
     <address1>123 Main St</address1>
     <address2 nil="nil"></address2>
     <city>San Francisco</city>
     <state>CA</state>
-    <zip>94105</zip> 
+    <zip>94105</zip>
     <country>US</country>
     <phone>8015559876</phone>
   </address>
   <accept_language nil="nil"></accept_language>
+  <vat_location_enabled type="boolean">true</vat_location_enabled>
 </account>

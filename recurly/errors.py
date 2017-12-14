@@ -50,7 +50,7 @@ class ResponseError(Exception):
             return el.text
 
     def __str__(self):
-        return six.text_type(self).encode('utf8')
+        return self.__unicode__()
 
     def __unicode__(self):
         symbol = self.symbol
@@ -67,7 +67,6 @@ class ClientError(ResponseError):
     is, an error with an HTTP ``4xx`` status code)."""
     pass
 
-
 class BadRequestError(ClientError):
     """An error showing the request was invalid or could not be
     understood by the server.
@@ -78,6 +77,9 @@ class BadRequestError(ClientError):
     """
     pass
 
+class ConfigurationError(Exception):
+    """An error related to a bad configuration"""
+    pass
 
 class UnauthorizedError(ClientError):
 
@@ -85,9 +87,6 @@ class UnauthorizedError(ClientError):
 
     def __init__(self, response_xml):
         self.response_text = response_xml
-
-    def __str__(self):
-        return six.text_type(self).encode('utf-8')
 
     def __unicode__(self):
         return six.text_type(self.response_text)
@@ -145,6 +144,15 @@ class ValidationError(ClientError):
     """An error indicating some values in the submitted request body
     were not valid."""
 
+    @property
+    def transaction_error_code(self):
+        """The machine-readable error code for a transaction error."""
+        error = self.response_doc.find('transaction_error')
+        if error is not None:
+            code = error.find('error_code')
+            if code is not None:
+                return code.text
+
     class Suberror(object):
 
         """An error describing the invalidity of a single invalid
@@ -154,9 +162,6 @@ class ValidationError(ClientError):
             self.field = field
             self.symbol = symbol
             self.message = message
-
-        def __str__(self):
-            return self.message.encode('utf8')
 
         def __unicode__(self):
             return six.u('%s: %s %s') % (self.symbol, self.field, self.message)
@@ -187,7 +192,7 @@ class ValidationError(ClientError):
         return suberrors
 
     def __unicode__(self):
-        return six.u('; ').join(six.text_type(error) for error in self.errors.itervalues())
+        return six.u('; ').join(six.text_type(error) for error in six.itervalues(self.errors))
 
 
 class ServerError(ResponseError):
@@ -262,5 +267,5 @@ def error_class_for_http_status(status):
             return UnexpectedStatusError(status, xml_response)
         return new_status_error
 
-
-__all__ = [x.__name__ for x in error_classes.values()]
+other_errors = [ConfigurationError]
+__all__ = [x.__name__ for x in list(error_classes.values()) + other_errors]

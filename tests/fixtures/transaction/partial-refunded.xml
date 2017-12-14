@@ -1,7 +1,8 @@
 DELETE https://api.recurly.com/v2/transactions/123456789012345678901234567890ac?amount_in_cents=700 HTTP/1.1
+X-Api-Version: 2.2
 Accept: application/xml
 Authorization: Basic YXBpa2V5Og==
-User-Agent: recurly-python/{version}
+User-Agent: {user-agent}
 
 
 HTTP/1.1 202 Accepted
@@ -23,6 +24,7 @@ Content-Type: application/xml; charset=utf-8
   <test type="boolean">true</test>
   <voidable type="boolean">true</voidable>
   <refundable type="boolean">true</refundable>
+  <ip_address>127.0.0.1</ip_address>
   <cvv_result code="" nil="nil"></cvv_result>
   <avs_result code="" nil="nil"></avs_result>
   <avs_result_street nil="nil"></avs_result_street>

@@ -1,7 +1,8 @@
 POST https://api.recurly.com/v2/plans HTTP/1.1
+X-Api-Version: 2.2
 Accept: application/xml
 Authorization: Basic YXBpa2V5Og==
-User-Agent: recurly-python/{version}
+User-Agent: {user-agent}
 Content-Type: application/xml; charset=utf-8
 
 <?xml version="1.0" encoding="UTF-8"?>
@@ -14,6 +15,7 @@ Content-Type: application/xml; charset=utf-8
   <setup_fee_in_cents>
     <USD type="integer">0</USD>
   </setup_fee_in_cents>
+  <total_billing_cycles type="integer">10</total_billing_cycles>
 </plan>
 
 HTTP/1.1 201 Created
@@ -38,11 +40,12 @@ Location: https://api.recurly.com/v2/plans/planmock
   <plan_interval_unit>months</plan_interval_unit>
   <trial_interval_length type="integer">0</trial_interval_length>
   <trial_interval_unit>days</trial_interval_unit>
+  <total_billing_cycles type="integer">10</total_billing_cycles>
   <created_at type="datetime">2011-10-03T22:23:12Z</created_at>
   <unit_amount_in_cents>
     <USD type="integer">1000</USD>
   </unit_amount_in_cents>
   <setup_fee_in_cents>
-    <USD type="integer">0</USD>
+    <USD type="integer">200</USD>
   </setup_fee_in_cents>
 </plan>
