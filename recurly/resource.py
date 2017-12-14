@@ -246,7 +246,11 @@ class Resource(object):
         if recurly.SOCKET_TIMEOUT_SECONDS:
             connection_options['timeout'] = recurly.SOCKET_TIMEOUT_SECONDS
         if urlparts.scheme != 'https':
-            connection = http_client.HTTPConnection(urlparts.netloc, **connection_options)
+            log = logging.getLogger('recurly.http.request')
+            log.error('Detected invalid HTTP schema for URL %s (forcing https)', urlparts.netloc)
+            connection = http_client.HTTPSConnection(urlparts.netloc)
+            # do not use HTTP anymore!
+            #connection = http_client.HTTPConnection(urlparts.netloc)
         elif recurly.CA_CERTS_FILE is None:
             connection = http_client.HTTPSConnection(urlparts.netloc, **connection_options)
         else:
