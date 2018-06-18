@@ -1,4 +1,4 @@
-import logging
+from recurly import recurly_logging as logging
 from six.moves.urllib.parse import urljoin
 from xml.etree import ElementTree
 
@@ -18,7 +18,10 @@ http://docs.recurly.com/api/
 """
 
 
-__version__ = '2.1.16'
+__version__ = '2.1.17'
+
+VALID_DOMAINS = ('.recurly.com',)
+"""A tuple of whitelisted domains that this client can connect to."""
 
 BASE_URI = 'https://%s.recurly.com/v2/'
 """The API endpoint to send requests to."""
